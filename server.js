@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { existsSync } from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { connectDB } from './config/db.js';
@@ -104,15 +105,37 @@ app.get('/api/health', (req, res) => {
 
 // Serve frontend static build files (SPA)
 const frontendDistPath = path.resolve(__dirname, '../SHOPLY FRONTEND/dist');
-app.use(express.static(frontendDistPath));
+const frontendIndexPath = path.join(frontendDistPath, 'index.html');
 
-// For all non-API GET requests, serve index.html for React Router client-side routing
-app.use((req, res, next) => {
-  if (req.method === 'GET' && !req.path.startsWith('/api')) {
-    return res.sendFile(path.join(frontendDistPath, 'index.html'));
-  }
-  next();
-});
+if (existsSync(frontendIndexPath)) {
+  app.use(express.static(frontendDistPath));
+
+  // For all non-API GET requests, serve index.html for React Router client-side routing
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api')) {
+      return res.sendFile(frontendIndexPath);
+    }
+    next();
+  });
+} else {
+  app.get('/', (req, res) => {
+    res.json({
+      status: 'healthy',
+      message: 'Shoply API is running. The frontend is deployed separately.',
+      health: '/api/health',
+    });
+  });
+
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/api')) {
+      return res.status(404).json({
+        message: 'Frontend is not deployed with this API.',
+        health: '/api/health',
+      });
+    }
+    next();
+  });
+}
 
 // Fallback 404 handler for unmatched API routes
 app.use((req, res) => {
