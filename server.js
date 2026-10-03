@@ -35,7 +35,7 @@ const defaultLocalOrigins = [
   'http://127.0.0.1:5173',
   'http://127.0.0.1:5174',
   'http://127.0.0.1:5175',
-  'http://127.0.0.1:3000',
+  'https://shoply-frontend-tq0m.onrender.com',
   'https://shoply-frontend-hjos.onrender.com',
 ];
 
