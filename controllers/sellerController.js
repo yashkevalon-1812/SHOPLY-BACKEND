@@ -1,0 +1,277 @@
+import { Product } from '../Models/Product.js';
+import { Order } from '../Models/Order.js';
+
+// @desc    Get seller dashboard statistics
+// @route   GET /api/seller/stats
+// @access  Private (Approved Seller)
+export const getSellerDashboardStats = async (req, res) => {
+  try {
+    const sellerId = req.user._id;
+
+    // Total products
+    const totalProducts = await Product.countDocuments({ seller: sellerId });
+
+    // Orders involving this seller
+    const orders = await Order.find({ 'orderItems.seller': sellerId });
+
+    let totalRevenue = 0;
+    let unitsSold = 0;
+
+    orders.forEach((order) => {
+      order.orderItems.forEach((item) => {
+        if (item.seller && item.seller.toString() === sellerId.toString()) {
+          totalRevenue += item.price * item.qty;
+          unitsSold += item.qty;
+        }
+      });
+    });
+
+    const pendingOrdersCount = orders.filter(
+      (order) => order.status === 'Processing'
+    ).length;
+
+    res.json({
+      totalProducts,
+      totalOrders: orders.length,
+      totalRevenue: Math.round(totalRevenue * 100) / 100,
+      unitsSold,
+      pendingOrdersCount,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get all products belonging to the logged in seller
+// @route   GET /api/seller/products
+// @access  Private (Approved Seller)
+export const getSellerProducts = async (req, res) => {
+  try {
+    const products = await Product.find({ seller: req.user._id }).sort({ createdAt: -1 });
+    res.json(products);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Create a product
+// @route   POST /api/seller/products
+// @access  Private (Approved Seller)
+export const createSellerProduct = async (req, res) => {
+  try {
+    const {
+      title,
+      description,
+      price,
+      discountPrice,
+      category,
+      brand,
+      stock,
+      images,
+      isFeatured,
+      isFlashDeal,
+      sku,
+      barcode,
+      condition,
+      bulletPoints,
+      specifications,
+      warranty,
+      fulfillmentChannel,
+      originCountry,
+    } = req.body;
+
+    const product = new Product({
+      title,
+      description,
+      price: Number(price),
+      discountPrice: discountPrice ? Number(discountPrice) : 0,
+      category,
+      brand: brand || req.user.shopName || 'Shoply Store',
+      stock: Number(stock) || 0,
+      images: Array.isArray(images) && images.length > 0 ? images : [images],
+      seller: req.user._id,
+      isFeatured: Boolean(isFeatured),
+      isFlashDeal: Boolean(isFlashDeal),
+      sku: sku || '',
+      barcode: barcode || '',
+      condition: condition || 'Brand New (Sealed)',
+      bulletPoints: Array.isArray(bulletPoints) ? bulletPoints.filter(Boolean) : [],
+      specifications: specifications || {},
+      warranty: warranty || '1 Year Brand Warranty',
+      fulfillmentChannel: fulfillmentChannel || 'Shoply Fulfilled',
+      originCountry: originCountry || 'India',
+    });
+
+    const createdProduct = await product.save();
+    res.status(201).json(createdProduct);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Update a seller product
+// @route   PUT /api/seller/products/:id
+// @access  Private (Approved Seller)
+export const updateSellerProduct = async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    if (
+      product.seller.toString() !== req.user._id.toString() &&
+      req.user.role !== 'admin'
+    ) {
+      return res.status(403).json({ message: 'Not authorized to modify this product' });
+    }
+
+    const {
+      title,
+      description,
+      price,
+      discountPrice,
+      category,
+      brand,
+      stock,
+      images,
+      isFeatured,
+      isFlashDeal,
+      sku,
+      barcode,
+      condition,
+      bulletPoints,
+      specifications,
+      warranty,
+      fulfillmentChannel,
+      originCountry,
+    } = req.body;
+
+    if (title) product.title = title;
+    if (description) product.description = description;
+    if (price !== undefined) product.price = Number(price);
+    if (discountPrice !== undefined) product.discountPrice = Number(discountPrice);
+    if (category) product.category = category;
+    if (brand) product.brand = brand;
+    if (stock !== undefined) product.stock = Number(stock);
+    if (images) product.images = Array.isArray(images) ? images : [images];
+    if (isFeatured !== undefined) product.isFeatured = Boolean(isFeatured);
+    if (isFlashDeal !== undefined) product.isFlashDeal = Boolean(isFlashDeal);
+    if (req.body.offerTag !== undefined) product.offerTag = req.body.offerTag.trim();
+    if (sku !== undefined) product.sku = sku;
+    if (barcode !== undefined) product.barcode = barcode;
+    if (condition !== undefined) product.condition = condition;
+    if (bulletPoints !== undefined) product.bulletPoints = Array.isArray(bulletPoints) ? bulletPoints.filter(Boolean) : [];
+    if (specifications !== undefined) product.specifications = specifications;
+    if (warranty !== undefined) product.warranty = warranty;
+    if (fulfillmentChannel !== undefined) product.fulfillmentChannel = fulfillmentChannel;
+    if (originCountry !== undefined) product.originCountry = originCountry;
+
+    const updatedProduct = await product.save();
+    res.json(updatedProduct);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Delete a seller product
+// @route   DELETE /api/seller/products/:id
+// @access  Private (Approved Seller)
+export const deleteSellerProduct = async (req, res) => {
+  try {
+    const product = await Product.findById(req.params.id);
+
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    if (
+      product.seller.toString() !== req.user._id.toString() &&
+      req.user.role !== 'admin'
+    ) {
+      return res.status(403).json({ message: 'Not authorized to delete this product' });
+    }
+
+    await product.deleteOne();
+    res.json({ message: 'Product removed successfully' });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Get orders relevant to the seller
+// @route   GET /api/seller/orders
+// @access  Private (Approved Seller)
+export const getSellerOrders = async (req, res) => {
+  try {
+    const orders = await Order.find({ 'orderItems.seller': req.user._id })
+      .populate('user', 'name email phone')
+      .sort({ createdAt: -1 });
+
+    res.json(orders);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Update order status
+// @route   PUT /api/seller/orders/:id/status
+// @access  Private (Approved Seller)
+export const updateSellerOrderStatus = async (req, res) => {
+  try {
+    const { status } = req.body;
+    const order = await Order.findById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    // Verify authorization: logged in user must have items in this order or be an admin
+    const isOrderSeller = order.orderItems.some(
+      (item) => item.seller && item.seller.toString() === req.user._id.toString()
+    );
+
+    if (!isOrderSeller && req.user.role !== 'admin') {
+      return res.status(403).json({ message: 'Not authorized to update status of this order' });
+    }
+
+    order.status = status;
+    if (status === 'Delivered') {
+      order.deliveredAt = new Date();
+      order.isPaid = true;
+    }
+
+    const updatedOrder = await order.save();
+    res.json(updatedOrder);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Reset/clear discounts for all products belonging to the logged-in seller
+// @route   POST /api/seller/products/reset-all-discounts
+// @access  Private (Approved Seller)
+export const resetAllSellerDiscounts = async (req, res) => {
+  try {
+    const filter = req.user.role === 'admin' ? {} : { seller: req.user._id };
+    const result = await Product.updateMany(
+      filter,
+      {
+        $set: {
+          discountPrice: 0,
+          offerTag: '',
+          isFlashDeal: false,
+          isMegaFlashSale: false,
+        },
+      }
+    );
+
+    res.json({
+      message: 'All item discounts reset successfully for your store listings.',
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};

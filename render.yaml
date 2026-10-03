@@ -1,0 +1,35 @@
+services:
+  - type: web
+    name: shoply-api
+    runtime: node
+    plan: free
+    buildCommand: npm ci --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Render injects PORT itself; the app already reads process.env.PORT.
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      # Encrypts seller bank details at rest. Must differ from JWT_SECRET so the
+      # two can be rotated independently.
+      - key: PAYOUT_ENCRYPTION_KEY
+        generateValue: true
+      # Comma-separated: your Vercel production URL plus any preview domains.
+      - key: CLIENT_URL
+        sync: false
+      - key: EMAIL_SERVICE
+        value: gmail
+      - key: EMAIL_HOST
+        value: smtp.gmail.com
+      - key: EMAIL_PORT
+        value: "587"
+      - key: EMAIL_USER
+        sync: false
+      - key: EMAIL_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
