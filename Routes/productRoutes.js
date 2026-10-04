@@ -8,7 +8,7 @@ import {
   getRelatedProducts,
   createProductReview,
 } from '../controllers/productController.js';
-import { protect } from '../middleware/auth.js';
+import { protect, optionalAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
@@ -17,7 +17,7 @@ router.get('/featured', getFeaturedProducts);
 router.get('/flash-deals', getFlashDeals);
 router.get('/categories', getCategories);
 router.get('/related/:id', getRelatedProducts);
-router.get('/:id', getProductById);
+router.get('/:id', optionalAuth, getProductById);
 router.post('/:id/reviews', protect, createProductReview);
 
 export default router;

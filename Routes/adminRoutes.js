@@ -19,6 +19,8 @@ import {
   getAllOrdersAdmin,
   updateOrderStatusAdmin,
   getSellerProductsGroupedAdmin,
+  updateProductApprovalAdmin,
+  approveAllSellerProductsAdmin,
 } from '../controllers/adminController.js';
 import { protect, adminOnly } from '../middleware/auth.js';
 
@@ -42,7 +44,9 @@ router.delete('/users/:id', deleteUser);
 router.get('/products', getAllProductsAdmin);
 router.post('/products', createProductAdmin);
 router.put('/products/:id', updateProductAdmin);
+router.put('/products/:id/approval', updateProductApprovalAdmin);
 router.get('/seller-products', getSellerProductsGroupedAdmin);
+router.put('/seller-products/approve-all/:sellerId', approveAllSellerProductsAdmin);
 router.put('/products/reset-all-discounts', resetAllProductDiscountsAdmin);
 router.put('/products/:id/discount', updateProductDiscountAdmin);
 router.delete('/products/:id', deleteProductAdmin);

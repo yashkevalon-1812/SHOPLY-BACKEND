@@ -53,7 +53,9 @@ export const getProducts = async (req, res) => {
       limit = 12,
     } = req.query;
 
-    const query = {};
+    const query = {
+      approvalStatus: 'approved',
+    };
 
     // Search keyword
     if (keyword) {
@@ -122,7 +124,7 @@ export const getProducts = async (req, res) => {
 // @access  Public
 export const getFeaturedProducts = async (req, res) => {
   try {
-    const products = await Product.find({ isFeatured: true })
+    const products = await Product.find({ isFeatured: true, approvalStatus: 'approved' })
       .populate('seller', 'name shopName')
       .limit(10);
     res.json(products);
@@ -154,7 +156,7 @@ export const getFlashDeals = async (req, res) => {
       }
     );
 
-    const products = await Product.find({ isFlashDeal: true })
+    const products = await Product.find({ isFlashDeal: true, approvalStatus: 'approved' })
       .populate('seller', 'name shopName')
       .sort({ isMegaFlashSale: -1, updatedAt: -1 })
       .limit(20);
@@ -171,6 +173,11 @@ export const getFlashDeals = async (req, res) => {
 export const getCategories = async (req, res) => {
   try {
     const categories = await Product.aggregate([
+      {
+        $match: {
+          approvalStatus: 'approved',
+        },
+      },
       {
         $group: {
           _id: '$category',
@@ -201,14 +208,34 @@ export const getProductById = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id).populate(
       'seller',
-      'name shopName email storeDescription'
+      'name shopName email storeDescription role'
     );
 
-    if (product) {
-      res.json(attachSellerOffers(product));
-    } else {
-      res.status(404).json({ message: 'Product not found' });
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' });
     }
+
+    // If product is not approved, only the owner seller or an admin can view it
+    if (product.approvalStatus && product.approvalStatus !== 'approved') {
+      const isOwner =
+        req.user &&
+        product.seller &&
+        (product.seller._id?.toString() === req.user._id.toString() ||
+          product.seller.toString() === req.user._id.toString());
+      const isAdmin = req.user && req.user.role === 'admin';
+
+      if (!isOwner && !isAdmin) {
+        return res.status(404).json({
+          message:
+            product.approvalStatus === 'pending'
+              ? 'This product is currently pending admin approval and is not yet available on the storefront.'
+              : 'This product listing is currently unavailable on the storefront.',
+          approvalStatus: product.approvalStatus,
+        });
+      }
+    }
+
+    res.json(attachSellerOffers(product));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -227,6 +254,7 @@ export const getRelatedProducts = async (req, res) => {
     const related = await Product.find({
       category: currentProduct.category,
       _id: { $ne: currentProduct._id },
+      approvalStatus: 'approved',
     })
       .populate('seller', 'name shopName')
       .limit(5);

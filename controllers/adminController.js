@@ -3,6 +3,7 @@ import { User } from '../Models/User.js';
 import { Product } from '../Models/Product.js';
 import { Order } from '../Models/Order.js';
 import { Message } from '../Models/Message.js';
+import { Notification } from '../Models/Notification.js';
 
 // @desc    Get overall admin platform analytics
 // @route   GET /api/admin/stats
@@ -16,6 +17,9 @@ export const getAdminDashboardStats = async (req, res) => {
     const pendingSellers = await User.countDocuments({
       role: 'seller',
       sellerStatus: 'pending',
+    });
+    const pendingProductsCount = await Product.countDocuments({
+      approvalStatus: 'pending',
     });
 
     const orders = await Order.find();
@@ -41,6 +45,7 @@ export const getAdminDashboardStats = async (req, res) => {
       totalOrders,
       totalSellers,
       pendingSellers,
+      pendingProductsCount,
       unreadMessagesCount,
       totalRevenue: Math.round(totalRevenue * 100) / 100,
       recentOrders,
@@ -265,6 +270,7 @@ export const createProductAdmin = async (req, res) => {
       stock: Number(stock) || 0,
       images: Array.isArray(images) && images.length > 0 ? images : [images],
       seller: req.user._id,
+      approvalStatus: 'approved',
       isFeatured: Boolean(isFeatured),
       isFlashDeal: Boolean(isFlashDeal),
       sku: sku || '',
@@ -568,7 +574,7 @@ export const updateOrderStatusAdmin = async (req, res) => {
 // @access  Private (Admin Only)
 export const getSellerProductsGroupedAdmin = async (req, res) => {
   try {
-    const { sellerId, status } = req.query;
+    const { sellerId, status, approvalStatus } = req.query;
 
     const sellerFilter = { role: 'seller' };
     if (sellerId) {
@@ -584,9 +590,19 @@ export const getSellerProductsGroupedAdmin = async (req, res) => {
     const products = await Product.find({ seller: { $in: sellerIds } }).sort({ createdAt: -1 });
 
     const sellersWithProducts = sellers.map((seller) => {
-      const sellerProducts = products.filter(
+      let sellerProducts = products.filter(
         (p) => p.seller && p.seller.toString() === seller._id.toString()
       );
+
+      const pendingCount = sellerProducts.filter((p) => p.approvalStatus === 'pending').length;
+      const approvedCount = sellerProducts.filter((p) => p.approvalStatus === 'approved').length;
+      const rejectedCount = sellerProducts.filter((p) => p.approvalStatus === 'rejected').length;
+
+      // Filter products if approvalStatus filter is provided
+      if (approvalStatus && approvalStatus !== 'all') {
+        sellerProducts = sellerProducts.filter((p) => p.approvalStatus === approvalStatus);
+      }
+
       const totalInventoryValue = sellerProducts.reduce(
         (acc, p) => acc + (p.price * (p.stock || 0)),
         0
@@ -607,6 +623,9 @@ export const getSellerProductsGroupedAdmin = async (req, res) => {
         productsCount: sellerProducts.length,
         totalInventoryValue,
         totalStock,
+        pendingCount,
+        approvedCount,
+        rejectedCount,
         products: sellerProducts,
       };
     });
@@ -614,6 +633,112 @@ export const getSellerProductsGroupedAdmin = async (req, res) => {
     res.json(sellersWithProducts);
   } catch (error) {
     console.error('Error fetching seller products for admin:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Approve or reject a product (Admin)
+// @route   PUT /api/admin/products/:id/approval
+// @access  Private (Admin Only)
+export const updateProductApprovalAdmin = async (req, res) => {
+  try {
+    const { status, reason } = req.body;
+    if (!['approved', 'rejected', 'pending'].includes(status)) {
+      return res.status(400).json({ message: 'Invalid status. Must be approved, rejected, or pending' });
+    }
+
+    const product = await Product.findById(req.params.id).populate('seller', 'name email shopName');
+    if (!product) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+
+    product.approvalStatus = status;
+    product.rejectionReason = status === 'rejected' ? (reason || 'Product does not meet marketplace standards') : '';
+    product.reviewedBy = req.user._id;
+    product.reviewedAt = new Date();
+
+    const saved = await product.save();
+
+    // Create notification for the seller
+    try {
+      const sellerId = product.seller?._id || product.seller;
+      if (sellerId) {
+        if (status === 'approved') {
+          await Notification.create({
+            title: 'Product Approved! 🎉',
+            message: `Your listing "${product.title}" has been approved by the Admin and is now live on the Shoply marketplace!`,
+            type: 'system',
+            priority: 'normal',
+            targetAudience: 'user',
+            recipient: sellerId,
+            link: `/product/${product._id}`,
+            sentBy: req.user._id,
+          });
+        } else if (status === 'rejected') {
+          await Notification.create({
+            title: 'Product Review Update ⚠️',
+            message: `Your listing "${product.title}" was not approved by the Admin. Reason: ${product.rejectionReason}`,
+            type: 'alert',
+            priority: 'high',
+            targetAudience: 'user',
+            recipient: sellerId,
+            link: '/seller/products',
+            sentBy: req.user._id,
+          });
+        }
+      }
+    } catch (notifErr) {
+      console.warn('Notification error on approval:', notifErr.message);
+    }
+
+    res.json({
+      message: `Product "${product.title}" has been marked as ${status}`,
+      product: saved,
+    });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Approve all pending products for a seller
+// @route   PUT /api/admin/seller-products/approve-all/:sellerId
+// @access  Private (Admin Only)
+export const approveAllSellerProductsAdmin = async (req, res) => {
+  try {
+    const { sellerId } = req.params;
+    const result = await Product.updateMany(
+      { seller: sellerId, approvalStatus: { $ne: 'approved' } },
+      {
+        $set: {
+          approvalStatus: 'approved',
+          rejectionReason: '',
+          reviewedBy: req.user._id,
+          reviewedAt: new Date(),
+        },
+      }
+    );
+
+    // Notify seller
+    try {
+      await Notification.create({
+        title: 'Catalog Approved! 🎉',
+        message: `All pending product listings for your shop have been approved by the Administrator and are now live!`,
+        type: 'system',
+        priority: 'normal',
+        targetAudience: 'user',
+        recipient: sellerId,
+        link: '/seller/products',
+        sentBy: req.user._id,
+      });
+    } catch (e) {
+      // Non-fatal
+    }
+
+    res.json({
+      message: `Approved ${result.modifiedCount} products for this merchant`,
+      modifiedCount: result.modifiedCount,
+    });
+  } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };

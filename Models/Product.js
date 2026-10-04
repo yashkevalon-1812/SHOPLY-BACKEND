@@ -170,6 +170,25 @@ const productSchema = new mongoose.Schema(
       default: 'India',
       trim: true,
     },
+    // Marketplace Seller Approval Workflow
+    approvalStatus: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'approved',
+      index: true,
+    },
+    rejectionReason: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    reviewedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+    },
+    reviewedAt: {
+      type: Date,
+    },
     sellerOffers: [sellerOfferSchema],
   },
   {

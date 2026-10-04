@@ -29,6 +29,12 @@ export const createOrder = async (req, res) => {
         return res.status(404).json({ message: `Product ${item.title || item.product} not found` });
       }
 
+      if (dbProduct.approvalStatus && dbProduct.approvalStatus !== 'approved') {
+        return res.status(400).json({
+          message: `Product "${dbProduct.title}" is currently not approved for sale.`,
+        });
+      }
+
       if (dbProduct.stock < item.qty) {
         return res.status(400).json({
           message: `Insufficient stock for ${dbProduct.title}. Available: ${dbProduct.stock}`,
