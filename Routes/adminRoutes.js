@@ -43,13 +43,17 @@ router.delete('/users/:id', deleteUser);
 // Products moderation & promotional discount campaign
 router.get('/products', getAllProductsAdmin);
 router.post('/products', createProductAdmin);
-router.put('/products/:id', updateProductAdmin);
+router.put('/products/reset-all-discounts', resetAllProductDiscountsAdmin);
 router.put('/products/:id/approval', updateProductApprovalAdmin);
+router.put('/products/:id/discount', updateProductDiscountAdmin);
+router.put('/products/:id', updateProductAdmin);
+router.delete('/products/:id', deleteProductAdmin);
+
+// Seller products moderation & bulk approval
 router.get('/seller-products', getSellerProductsGroupedAdmin);
 router.put('/seller-products/approve-all/:sellerId', approveAllSellerProductsAdmin);
-router.put('/products/reset-all-discounts', resetAllProductDiscountsAdmin);
-router.put('/products/:id/discount', updateProductDiscountAdmin);
-router.delete('/products/:id', deleteProductAdmin);
+router.put('/seller-products/:sellerId/approve-all', approveAllSellerProductsAdmin);
+router.put('/seller-products/:id/approval', updateProductApprovalAdmin);
 
 // Scheduled Flash Sales endpoints
 router.get('/flash-sales', getScheduledFlashSalesAdmin);

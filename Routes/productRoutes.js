@@ -7,11 +7,13 @@ import {
   getProductById,
   getRelatedProducts,
   createProductReview,
+  proxyProductImage,
 } from '../controllers/productController.js';
 import { protect, optionalAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 
+router.get('/image-proxy', proxyProductImage);
 router.get('/', getProducts);
 router.get('/featured', getFeaturedProducts);
 router.get('/flash-deals', getFlashDeals);

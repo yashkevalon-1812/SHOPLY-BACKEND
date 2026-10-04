@@ -1,3 +1,5 @@
+import https from 'https';
+import http from 'http';
 import { Product } from '../Models/Product.js';
 
 // Helper to provide multi-seller comparison offers for products
@@ -302,5 +304,52 @@ export const createProductReview = async (req, res) => {
     res.status(201).json({ message: 'Review added successfully', product });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Proxy an external product image to bypass CORS/hotlinking/adblocker blocks
+// @route   GET /api/products/image-proxy
+// @access  Public
+export const proxyProductImage = async (req, res) => {
+  try {
+    const { url } = req.query;
+    if (!url || typeof url !== 'string' || !url.startsWith('http')) {
+      return res.status(400).json({ message: 'Valid image URL is required' });
+    }
+
+    const client = url.startsWith('https://') ? https : http;
+    const request = client.get(
+      url,
+      {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+        },
+      },
+      (upstreamRes) => {
+        if (upstreamRes.statusCode && upstreamRes.statusCode >= 400) {
+          return res.redirect(
+            'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80'
+          );
+        }
+
+        const contentType = upstreamRes.headers['content-type'] || 'image/jpeg';
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Cache-Control', 'public, max-age=604800, s-maxage=604800');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        upstreamRes.pipe(res);
+      }
+    );
+
+    request.on('error', () => {
+      res.redirect(
+        'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80'
+      );
+    });
+  } catch (error) {
+    res.redirect(
+      'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80'
+    );
   }
 };
