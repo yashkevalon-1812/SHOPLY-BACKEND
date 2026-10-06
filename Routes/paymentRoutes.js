@@ -4,7 +4,7 @@ import {
   createRazorpayOrder,
   verifyRazorpayPayment,
   cancelUnpaidRazorpayOrder,
-} from '../Controllers/paymentController.js';
+} from '../controllers/paymentController.js';
 import { protect } from '../middleware/auth.js';
 
 const router = express.Router();
