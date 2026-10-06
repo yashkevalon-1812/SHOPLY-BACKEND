@@ -192,7 +192,7 @@ export const createOrder = async (req, res) => {
       // Also create order confirmation notification for the buyer
       await Notification.create({
         title: `📦 Order Placed Successfully (#${shortOrderId})`,
-        message: `Your purchase of ${orderItems.length} item(s) totaling ₹${totalPrice.toLocaleString('en-IN')} has been received and is being prepared.`,
+        message: `Your purchase of ${orderItems.length} item(s) totaling ₹${calculatedTotalPrice.toLocaleString('en-IN')} has been received and is being prepared.`,
         type: 'order',
         priority: 'normal',
         targetAudience: 'user',

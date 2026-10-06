@@ -16,6 +16,7 @@ import contactRoutes from './Routes/contactRoutes.js';
 import couponRoutes from './Routes/couponRoutes.js';
 import promotionRoutes from './Routes/promotionRoutes.js';
 import notificationRoutes from './Routes/notificationRoutes.js';
+import paymentRoutes from './Routes/paymentRoutes.js';
 
 dotenv.config();
 
@@ -104,6 +105,7 @@ app.use('/api/contact', contactRoutes);
 app.use('/api/coupons', couponRoutes);
 app.use('/api/promotions', promotionRoutes);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/payment', paymentRoutes);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
