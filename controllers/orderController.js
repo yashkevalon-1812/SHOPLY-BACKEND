@@ -35,17 +35,25 @@ export const createOrder = async (req, res) => {
         });
       }
 
-      if (dbProduct.stock < item.qty) {
+      // Atomically verify and decrement inventory to eliminate race conditions and overselling
+      const updatedProduct = await Product.findOneAndUpdate(
+        {
+          _id: dbProduct._id,
+          stock: { $gte: item.qty },
+        },
+        {
+          $inc: { stock: -item.qty },
+        },
+        { new: true }
+      );
+
+      if (!updatedProduct) {
         return res.status(400).json({
-          message: `Insufficient stock for ${dbProduct.title}. Available: ${dbProduct.stock}`,
+          message: `Insufficient stock for "${dbProduct.title}". Only ${dbProduct.stock} unit(s) left.`,
         });
       }
 
-      // Deduct stock
-      dbProduct.stock = Math.max(0, dbProduct.stock - item.qty);
-      await dbProduct.save();
-
-      // Dynamic unit price directly from DB record (prevent client tamper)
+      // Dynamic unit price directly from DB record (prevent client price tampering)
       const unitPrice = dbProduct.discountPrice > 0 ? dbProduct.discountPrice : dbProduct.price;
       calculatedItemsPrice += unitPrice * item.qty;
 
@@ -59,11 +67,11 @@ export const createOrder = async (req, res) => {
       });
     }
 
-    // Dynamic Coupon Calculation from DB
+    // Dynamic Coupon Calculation from DB (Strict verification against active coupons)
     let calculatedDiscount = 0;
     let validatedCouponCode = '';
 
-    if (couponCode && typeof couponCode === 'string') {
+    if (couponCode && typeof couponCode === 'string' && couponCode.trim()) {
       const trimmedCode = couponCode.trim().toUpperCase();
       const dbCoupon = await Coupon.findOne({
         code: trimmedCode,
@@ -83,7 +91,7 @@ export const createOrder = async (req, res) => {
               ? Math.min(rawDiscount, dbCoupon.maxDiscountAmount)
               : rawDiscount;
           } else {
-            // flat
+            // flat discount
             calculatedDiscount = dbCoupon.discountValue;
           }
           calculatedDiscount = Math.min(calculatedItemsPrice, calculatedDiscount);
@@ -93,9 +101,6 @@ export const createOrder = async (req, res) => {
           await dbCoupon.save();
         }
       }
-    } else if (req.body.discountAmount && Number(req.body.discountAmount) > 0) {
-      // In case client had a verified discount without code (safeguard capped at itemsPrice)
-      calculatedDiscount = Math.min(calculatedItemsPrice, Number(req.body.discountAmount));
     }
 
     // Dynamic Shipping & Tax (GST 18% standard)

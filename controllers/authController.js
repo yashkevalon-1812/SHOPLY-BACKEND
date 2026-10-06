@@ -204,13 +204,19 @@ export const registerAdmin = async (req, res) => {
   try {
     const { name, email, password, phone, adminSecretKey } = req.body;
 
-    const validKeys = [
-      process.env.ADMIN_SECRET_KEY,
-      'SHOPLY_ADMIN_2026',
-      'VELORA_ADMIN_2026',
-    ].filter(Boolean);
+    const configuredKey = process.env.ADMIN_SECRET_KEY;
+    const isProduction = process.env.NODE_ENV === 'production';
 
-    if (!adminSecretKey || !validKeys.includes(adminSecretKey.trim())) {
+    // In production, strictly mandate an environment-configured key that is not a default placeholder
+    if (isProduction && (!configuredKey || configuredKey === 'SHOPLY_ADMIN_2026' || configuredKey === 'VELORA_ADMIN_2026')) {
+      return res.status(500).json({
+        message: 'Security error: ADMIN_SECRET_KEY must be properly configured in environment variables for production.',
+      });
+    }
+
+    const validKey = configuredKey || 'SHOPLY_ADMIN_2026';
+
+    if (!adminSecretKey || adminSecretKey.trim() !== validKey.trim()) {
       return res.status(401).json({
         message: 'Invalid Admin Security Passcode. Administrator authorization denied.',
       });

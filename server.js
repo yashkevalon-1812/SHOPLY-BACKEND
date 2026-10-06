@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
 import dotenv from 'dotenv';
 import { existsSync } from 'fs';
 import path from 'path';
@@ -19,6 +20,13 @@ import notificationRoutes from './Routes/notificationRoutes.js';
 dotenv.config();
 
 const app = express();
+
+// Security headers with cross-origin asset support
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
 
 // Connect to MongoDB
 connectDB();
@@ -144,6 +152,9 @@ app.use((req, res) => {
 
 // Global error handler
 app.use((err, req, res, next) => {
+  if (err.name === 'CastError') {
+    return res.status(404).json({ message: 'Resource not found with the requested ID' });
+  }
   const statusCode = res.statusCode === 200 ? 500 : res.statusCode;
   console.error('Server error:', err.message);
   res.status(statusCode).json({

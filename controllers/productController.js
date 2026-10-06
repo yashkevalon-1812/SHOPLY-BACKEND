@@ -239,6 +239,9 @@ export const getProductById = async (req, res) => {
 
     res.json(attachSellerOffers(product));
   } catch (error) {
+    if (error.name === 'CastError') {
+      return res.status(404).json({ message: 'Product not found' });
+    }
     res.status(500).json({ message: error.message });
   }
 };
@@ -263,6 +266,9 @@ export const getRelatedProducts = async (req, res) => {
 
     res.json(related);
   } catch (error) {
+    if (error.name === 'CastError') {
+      return res.status(404).json({ message: 'Product not found' });
+    }
     res.status(500).json({ message: error.message });
   }
 };
@@ -307,49 +313,91 @@ export const createProductReview = async (req, res) => {
   }
 };
 
-// @desc    Proxy an external product image to bypass CORS/hotlinking/adblocker blocks
+// @desc    Proxy an external product image to bypass CORS/hotlinking/adblocker blocks with strict SSRF protection
 // @route   GET /api/products/image-proxy
 // @access  Public
 export const proxyProductImage = async (req, res) => {
+  const fallbackImage =
+    'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80';
+
   try {
     const { url } = req.query;
     if (!url || typeof url !== 'string' || !url.startsWith('http')) {
       return res.status(400).json({ message: 'Valid image URL is required' });
     }
 
-    const client = url.startsWith('https://') ? https : http;
+    let parsedUrl;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      return res.status(400).json({ message: 'Invalid URL format' });
+    }
+
+    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
+      return res.status(400).json({ message: 'Only HTTP/HTTPS protocols are permitted' });
+    }
+
+    const hostname = parsedUrl.hostname.toLowerCase();
+
+    // Prevent SSRF: block internal addresses, loopbacks, link-local, and cloud metadata (169.254.*)
+    const isPrivateOrInternal =
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      hostname === '0.0.0.0' ||
+      hostname === '::1' ||
+      hostname.endsWith('.local') ||
+      hostname.endsWith('.internal') ||
+      hostname.endsWith('.localhost') ||
+      /^10\./.test(hostname) ||
+      /^192\.168\./.test(hostname) ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname) ||
+      /^169\.254\./.test(hostname) ||
+      /^127\./.test(hostname);
+
+    if (isPrivateOrInternal) {
+      return res.status(403).json({ message: 'Access to private or local network resources is forbidden' });
+    }
+
+    const client = parsedUrl.protocol === 'https:' ? https : http;
     const request = client.get(
-      url,
+      parsedUrl.href,
       {
         headers: {
           'User-Agent':
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
           Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
         },
+        timeout: 5000,
       },
       (upstreamRes) => {
         if (upstreamRes.statusCode && upstreamRes.statusCode >= 400) {
-          return res.redirect(
-            'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80'
-          );
+          return res.redirect(fallbackImage);
         }
 
-        const contentType = upstreamRes.headers['content-type'] || 'image/jpeg';
-        res.setHeader('Content-Type', contentType);
+        const rawContentType = upstreamRes.headers['content-type'] || 'image/jpeg';
+
+        // Verify that the upstream response is actually an image
+        if (!rawContentType.toLowerCase().startsWith('image/')) {
+          return res.redirect(fallbackImage);
+        }
+
+        res.setHeader('Content-Type', rawContentType);
         res.setHeader('Cache-Control', 'public, max-age=604800, s-maxage=604800');
+        res.setHeader('X-Content-Type-Options', 'nosniff');
         res.setHeader('Access-Control-Allow-Origin', '*');
         upstreamRes.pipe(res);
       }
     );
 
+    request.on('timeout', () => {
+      request.destroy();
+      res.redirect(fallbackImage);
+    });
+
     request.on('error', () => {
-      res.redirect(
-        'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80'
-      );
+      res.redirect(fallbackImage);
     });
   } catch (error) {
-    res.redirect(
-      'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80'
-    );
+    res.redirect(fallbackImage);
   }
 };
