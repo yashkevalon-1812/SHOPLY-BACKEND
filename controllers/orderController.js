@@ -21,15 +21,24 @@ export const createOrder = async (req, res) => {
 
     // Attach seller ID to each item if not present, and update inventory stock
     const populatedItems = [];
+    const deductedItems = [];
     let calculatedItemsPrice = 0;
 
     for (const item of orderItems) {
       const dbProduct = await Product.findById(item.product);
       if (!dbProduct) {
+        // Rollback previously deducted items
+        for (const d of deductedItems) {
+          await Product.findByIdAndUpdate(d.productId, { $inc: { stock: d.qty } });
+        }
         return res.status(404).json({ message: `Product ${item.title || item.product} not found` });
       }
 
       if (dbProduct.approvalStatus && dbProduct.approvalStatus !== 'approved') {
+        // Rollback previously deducted items
+        for (const d of deductedItems) {
+          await Product.findByIdAndUpdate(d.productId, { $inc: { stock: d.qty } });
+        }
         return res.status(400).json({
           message: `Product "${dbProduct.title}" is currently not approved for sale.`,
         });
@@ -48,10 +57,16 @@ export const createOrder = async (req, res) => {
       );
 
       if (!updatedProduct) {
+        // Rollback previously deducted items
+        for (const d of deductedItems) {
+          await Product.findByIdAndUpdate(d.productId, { $inc: { stock: d.qty } });
+        }
         return res.status(400).json({
           message: `Insufficient stock for "${dbProduct.title}". Only ${dbProduct.stock} unit(s) left.`,
         });
       }
+
+      deductedItems.push({ productId: dbProduct._id, qty: item.qty });
 
       // Dynamic unit price directly from DB record (prevent client price tampering)
       const unitPrice = dbProduct.discountPrice > 0 ? dbProduct.discountPrice : dbProduct.price;
@@ -194,6 +209,12 @@ export const createOrder = async (req, res) => {
 
     res.status(201).json(createdOrder);
   } catch (error) {
+    // Rollback any stock deducted if order saving failed
+    if (typeof deductedItems !== 'undefined' && Array.isArray(deductedItems)) {
+      for (const d of deductedItems) {
+        await Product.findByIdAndUpdate(d.productId, { $inc: { stock: d.qty } }).catch(() => {});
+      }
+    }
     res.status(500).json({ message: error.message });
   }
 };
@@ -236,6 +257,86 @@ export const getOrderById = async (req, res) => {
 
     res.json(order);
   } catch (error) {
+    if (error.name === 'CastError') {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Cancel order by buyer or admin and atomically restore inventory
+// @route   PUT /api/orders/:id/cancel
+// @access  Private (Buyer or Admin)
+export const cancelOrder = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+
+    const isOwner = order.user.toString() === req.user._id.toString();
+    const isAdmin = req.user.role === 'admin';
+
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ message: 'Not authorized to cancel this order' });
+    }
+
+    if (order.status === 'Cancelled') {
+      return res.status(400).json({ message: 'Order is already cancelled' });
+    }
+
+    if (order.status === 'Delivered') {
+      return res.status(400).json({ message: 'Delivered orders cannot be cancelled' });
+    }
+
+    if (order.status === 'Shipped' && !isAdmin) {
+      return res.status(400).json({
+        message: 'Order has already been shipped and cannot be cancelled directly. Please contact support.',
+      });
+    }
+
+    order.status = 'Cancelled';
+    const updatedOrder = await order.save();
+
+    // Atomically restock all items in the cancelled order
+    for (const item of order.orderItems) {
+      if (item.product) {
+        await Product.findByIdAndUpdate(item.product, {
+          $inc: { stock: item.qty },
+        });
+      }
+    }
+
+    // Send notification to unique sellers and buyer
+    try {
+      const shortOrderId = order._id.toString().slice(-6).toUpperCase();
+      const sellerIds = [...new Set(order.orderItems.map((i) => i.seller?.toString()).filter(Boolean))];
+
+      for (const sellerId of sellerIds) {
+        await Notification.create({
+          title: `Order Cancelled (#${shortOrderId})`,
+          message: `Order #${shortOrderId} has been cancelled. Inventory was automatically restocked.`,
+          type: 'alert',
+          priority: 'high',
+          targetAudience: 'user',
+          recipient: sellerId,
+          link: '/seller/orders',
+          sentBy: req.user._id,
+        });
+      }
+    } catch (notifErr) {
+      console.warn('Notification notice on order cancellation:', notifErr.message);
+    }
+
+    res.json({
+      message: 'Order cancelled successfully and inventory restored',
+      order: updatedOrder,
+    });
+  } catch (error) {
+    if (error.name === 'CastError') {
+      return res.status(404).json({ message: 'Order not found' });
+    }
     res.status(500).json({ message: error.message });
   }
 };

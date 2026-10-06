@@ -209,6 +209,9 @@ export const updateSellerProduct = async (req, res) => {
     const updatedProduct = await product.save();
     res.json(updatedProduct);
   } catch (error) {
+    if (error.name === 'CastError') {
+      return res.status(404).json({ message: 'Product not found' });
+    }
     res.status(500).json({ message: error.message });
   }
 };
@@ -234,6 +237,9 @@ export const deleteSellerProduct = async (req, res) => {
     await product.deleteOne();
     res.json({ message: 'Product removed successfully' });
   } catch (error) {
+    if (error.name === 'CastError') {
+      return res.status(404).json({ message: 'Product not found' });
+    }
     res.status(500).json({ message: error.message });
   }
 };
@@ -274,6 +280,7 @@ export const updateSellerOrderStatus = async (req, res) => {
       return res.status(403).json({ message: 'Not authorized to update status of this order' });
     }
 
+    const previousStatus = order.status;
     order.status = status;
     if (status === 'Delivered') {
       order.deliveredAt = new Date();
@@ -281,8 +288,32 @@ export const updateSellerOrderStatus = async (req, res) => {
     }
 
     const updatedOrder = await order.save();
+
+    // Restock inventory when order is cancelled
+    if (status === 'Cancelled' && previousStatus !== 'Cancelled') {
+      for (const item of order.orderItems) {
+        if (item.product) {
+          await Product.findByIdAndUpdate(item.product, {
+            $inc: { stock: item.qty },
+          });
+        }
+      }
+    } else if (previousStatus === 'Cancelled' && status !== 'Cancelled') {
+      // Re-decrement stock if uncancelled
+      for (const item of order.orderItems) {
+        if (item.product) {
+          await Product.findByIdAndUpdate(item.product, {
+            $inc: { stock: -item.qty },
+          });
+        }
+      }
+    }
+
     res.json(updatedOrder);
   } catch (error) {
+    if (error.name === 'CastError') {
+      return res.status(404).json({ message: 'Order not found' });
+    }
     res.status(500).json({ message: error.message });
   }
 };

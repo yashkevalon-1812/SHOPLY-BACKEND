@@ -1,6 +1,7 @@
 import https from 'https';
 import http from 'http';
 import { Product } from '../Models/Product.js';
+import { Order } from '../Models/Order.js';
 
 // Helper to provide multi-seller comparison offers for products
 export const attachSellerOffers = (productDoc) => {
@@ -279,6 +280,16 @@ export const getRelatedProducts = async (req, res) => {
 export const createProductReview = async (req, res) => {
   try {
     const { rating, comment } = req.body;
+
+    const numRating = Number(rating);
+    if (isNaN(numRating) || numRating < 1 || numRating > 5) {
+      return res.status(400).json({ message: 'Rating must be a valid number between 1 and 5' });
+    }
+
+    if (!comment || typeof comment !== 'string' || !comment.trim()) {
+      return res.status(400).json({ message: 'Review comment cannot be empty' });
+    }
+
     const product = await Product.findById(req.params.id);
 
     if (!product) {
@@ -293,11 +304,19 @@ export const createProductReview = async (req, res) => {
       return res.status(400).json({ message: 'You have already reviewed this product' });
     }
 
+    // Check if the reviewing user has purchased this product
+    const hasPurchased = await Order.exists({
+      user: req.user._id,
+      'orderItems.product': product._id,
+      status: { $in: ['Processing', 'Shipped', 'Delivered'] },
+    });
+
     const review = {
       name: req.user.name,
-      rating: Number(rating),
-      comment,
+      rating: Math.round(numRating),
+      comment: comment.trim(),
       user: req.user._id,
+      isVerifiedPurchase: Boolean(hasPurchased),
     };
 
     product.reviews.push(review);
@@ -309,6 +328,9 @@ export const createProductReview = async (req, res) => {
     await product.save();
     res.status(201).json({ message: 'Review added successfully', product });
   } catch (error) {
+    if (error.name === 'CastError') {
+      return res.status(404).json({ message: 'Product not found' });
+    }
     res.status(500).json({ message: error.message });
   }
 };
@@ -356,6 +378,38 @@ export const proxyProductImage = async (req, res) => {
 
     if (isPrivateOrInternal) {
       return res.status(403).json({ message: 'Access to private or local network resources is forbidden' });
+    }
+
+    // Whitelist approved external image CDNs & media hosts
+    const DEFAULT_ALLOWED_DOMAINS = [
+      'images.unsplash.com',
+      'plus.unsplash.com',
+      'res.cloudinary.com',
+      'cloudinary.com',
+      'i.imgur.com',
+      'imgur.com',
+      'images.pexels.com',
+      'img.freepik.com',
+      'm.media-amazon.com',
+      'images-na.ssl-images-amazon.com',
+      'cdn.shopify.com',
+      'lh3.googleusercontent.com',
+      'firebasestorage.googleapis.com',
+    ];
+
+    const envDomains = (process.env.ALLOWED_IMAGE_DOMAINS || '')
+      .split(',')
+      .map((d) => d.trim().toLowerCase())
+      .filter(Boolean);
+
+    const allowedDomains = new Set([...DEFAULT_ALLOWED_DOMAINS, ...envDomains]);
+
+    const isDomainAllowed =
+      allowedDomains.has(hostname) ||
+      [...allowedDomains].some((domain) => hostname === domain || hostname.endsWith('.' + domain));
+
+    if (!isDomainAllowed) {
+      return res.redirect(fallbackImage);
     }
 
     const client = parsedUrl.protocol === 'https:' ? https : http;

@@ -547,11 +547,32 @@ export const updateOrderStatusAdmin = async (req, res) => {
       return res.status(404).json({ message: 'Order not found' });
     }
 
+    const prevStatus = order.status;
     if (status) {
       order.status = status;
       if (status === 'Delivered') {
         order.deliveredAt = new Date();
         order.isPaid = true;
+      }
+
+      // Restock inventory when order is cancelled
+      if (status === 'Cancelled' && prevStatus !== 'Cancelled') {
+        for (const item of order.orderItems) {
+          if (item.product) {
+            await Product.findByIdAndUpdate(item.product, {
+              $inc: { stock: item.qty },
+            });
+          }
+        }
+      } else if (prevStatus === 'Cancelled' && status !== 'Cancelled') {
+        // Re-decrement stock if uncancelled
+        for (const item of order.orderItems) {
+          if (item.product) {
+            await Product.findByIdAndUpdate(item.product, {
+              $inc: { stock: -item.qty },
+            });
+          }
+        }
       }
     }
 
@@ -565,6 +586,9 @@ export const updateOrderStatusAdmin = async (req, res) => {
     const updatedOrder = await order.save();
     res.json(updatedOrder);
   } catch (error) {
+    if (error.name === 'CastError') {
+      return res.status(404).json({ message: 'Order not found' });
+    }
     res.status(500).json({ message: error.message });
   }
 };

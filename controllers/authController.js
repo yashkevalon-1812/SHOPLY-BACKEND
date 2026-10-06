@@ -1,10 +1,12 @@
+import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { User } from '../Models/User.js';
 import { sendOtpEmail } from '../utils/sendEmail.js';
 import { encryptValue, maskValue } from '../utils/payoutCrypto.js';
+import { getJwtSecret } from '../middleware/auth.js';
 
 const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || 'velora_secret_jwt_key_9823487293847', {
+  return jwt.sign({ id }, getJwtSecret(), {
     expiresIn: '30d',
   });
 };
@@ -27,7 +29,18 @@ export const registerUser = async (req, res) => {
       payoutDetails,
     } = req.body;
 
-    const userExists = await User.findOne({ email: email.toLowerCase() });
+    if (
+      !name ||
+      !email ||
+      !password ||
+      typeof name !== 'string' ||
+      typeof email !== 'string' ||
+      typeof password !== 'string'
+    ) {
+      return res.status(400).json({ message: 'Valid name, email, and password are required' });
+    }
+
+    const userExists = await User.findOne({ email: email.toLowerCase().trim() });
     if (userExists) {
       return res.status(400).json({ message: 'A user with this email already exists' });
     }
@@ -104,8 +117,13 @@ export const registerUser = async (req, res) => {
 export const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ message: 'Email and password are required' });
+    if (
+      !email ||
+      !password ||
+      typeof email !== 'string' ||
+      typeof password !== 'string'
+    ) {
+      return res.status(400).json({ message: 'Valid email and password are required' });
     }
     let searchEmail = email.toLowerCase().trim();
     let user = await User.findOne({ email: searchEmail });
@@ -205,28 +223,44 @@ export const registerAdmin = async (req, res) => {
     const { name, email, password, phone, adminSecretKey } = req.body;
 
     const configuredKey = process.env.ADMIN_SECRET_KEY;
-    const isProduction = process.env.NODE_ENV === 'production';
 
-    // In production, strictly mandate an environment-configured key that is not a default placeholder
-    if (isProduction && (!configuredKey || configuredKey === 'SHOPLY_ADMIN_2026' || configuredKey === 'VELORA_ADMIN_2026')) {
-      return res.status(500).json({
-        message: 'Security error: ADMIN_SECRET_KEY must be properly configured in environment variables for production.',
+    if (!configuredKey || typeof configuredKey !== 'string') {
+      return res.status(503).json({
+        message: 'Administrator registration is disabled because ADMIN_SECRET_KEY is not configured in server environment variables.',
       });
     }
 
-    const validKey = configuredKey || 'SHOPLY_ADMIN_2026';
-
-    if (!adminSecretKey || adminSecretKey.trim() !== validKey.trim()) {
+    if (!adminSecretKey || typeof adminSecretKey !== 'string') {
       return res.status(401).json({
         message: 'Invalid Admin Security Passcode. Administrator authorization denied.',
       });
     }
 
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: 'Name, email, and password are required' });
+    // Constant-time comparison to prevent side-channel timing analysis
+    const submittedBuf = Buffer.from(adminSecretKey.trim());
+    const configuredBuf = Buffer.from(configuredKey.trim());
+    const isKeyValid =
+      submittedBuf.length === configuredBuf.length &&
+      crypto.timingSafeEqual(submittedBuf, configuredBuf);
+
+    if (!isKeyValid) {
+      return res.status(401).json({
+        message: 'Invalid Admin Security Passcode. Administrator authorization denied.',
+      });
     }
 
-    const userExists = await User.findOne({ email: email.toLowerCase() });
+    if (
+      !name ||
+      !email ||
+      !password ||
+      typeof name !== 'string' ||
+      typeof email !== 'string' ||
+      typeof password !== 'string'
+    ) {
+      return res.status(400).json({ message: 'Valid name, email, and password are required' });
+    }
+
+    const userExists = await User.findOne({ email: email.toLowerCase().trim() });
     if (userExists) {
       return res.status(400).json({ message: 'An account with this email already exists' });
     }
@@ -331,8 +365,13 @@ export const forgotPassword = async (req, res) => {
 export const verifyResetOtp = async (req, res) => {
   try {
     const { email, otp } = req.body;
-    if (!email || !otp) {
-      return res.status(400).json({ message: 'Email and OTP code are required' });
+    if (
+      !email ||
+      !otp ||
+      typeof email !== 'string' ||
+      typeof otp !== 'string'
+    ) {
+      return res.status(400).json({ message: 'Valid email and OTP code are required' });
     }
 
     let searchEmail = email.toLowerCase().trim();
@@ -370,8 +409,15 @@ export const verifyResetOtp = async (req, res) => {
 export const resetPasswordWithOtp = async (req, res) => {
   try {
     const { email, otp, newPassword } = req.body;
-    if (!email || !otp || !newPassword) {
-      return res.status(400).json({ message: 'Email, OTP, and new password are required' });
+    if (
+      !email ||
+      !otp ||
+      !newPassword ||
+      typeof email !== 'string' ||
+      typeof otp !== 'string' ||
+      typeof newPassword !== 'string'
+    ) {
+      return res.status(400).json({ message: 'Valid email, OTP, and new password are required' });
     }
 
     if (newPassword.length < 6) {

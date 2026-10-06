@@ -1,6 +1,17 @@
 import jwt from 'jsonwebtoken';
 import { User } from '../Models/User.js';
 
+export const getJwtSecret = () => {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('FATAL SECURITY ERROR: JWT_SECRET environment variable is missing in production!');
+    }
+    return 'shoply_development_fallback_jwt_secret_9823487293847';
+  }
+  return secret;
+};
+
 export const protect = async (req, res, next) => {
   let token;
 
@@ -10,10 +21,7 @@ export const protect = async (req, res, next) => {
   ) {
     try {
       token = req.headers.authorization.split(' ')[1];
-      const decoded = jwt.verify(
-        token,
-        process.env.JWT_SECRET || 'velora_secret_jwt_key_9823487293847'
-      );
+      const decoded = jwt.verify(token, getJwtSecret());
       req.user = await User.findById(decoded.id).select('-password');
 
       if (!req.user) {
@@ -40,10 +48,7 @@ export const optionalAuth = async (req, res, next) => {
   ) {
     try {
       const token = req.headers.authorization.split(' ')[1];
-      const decoded = jwt.verify(
-        token,
-        process.env.JWT_SECRET || 'velora_secret_jwt_key_9823487293847'
-      );
+      const decoded = jwt.verify(token, getJwtSecret());
       req.user = await User.findById(decoded.id).select('-password');
     } catch {
       // Ignore token verification errors for optional routes
