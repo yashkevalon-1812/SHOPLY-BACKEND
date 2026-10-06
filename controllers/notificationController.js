@@ -126,15 +126,30 @@ export const getUserNotifications = async (req, res) => {
     }
 
     audienceConditions.push({ recipient: userId });
+    try {
+      audienceConditions.push({ recipient: userId.toString() });
+    } catch {}
 
     const notifications = await Notification.find({
       isActive: true,
       $or: audienceConditions,
+      'deletedBy.user': { $ne: userId },
     })
       .sort({ createdAt: -1 })
       .limit(40);
 
-    const formatted = notifications.map((n) => {
+    // Double-layer safety check: exclude any notification where deletedBy contains this user
+    const activeNotifications = notifications.filter((n) => {
+      if (Array.isArray(n.deletedBy) && n.deletedBy.length > 0) {
+        const isDismissed = n.deletedBy.some(
+          (d) => d.user && d.user.toString() === userId.toString()
+        );
+        if (isDismissed) return false;
+      }
+      return true;
+    });
+
+    const formatted = activeNotifications.map((n) => {
       const isRead = n.readBy.some(
         (r) => r.user && r.user.toString() === userId.toString()
       );
@@ -229,6 +244,101 @@ export const markAllNotificationsAsRead = async (req, res) => {
     res.json({ message: 'All notifications marked as read', updatedCount: notifications.length });
   } catch (error) {
     console.error('Error marking all as read:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Permanently delete or dismiss single notification for user
+// @route   DELETE /api/notifications/:id
+// @access  Private (Authenticated)
+export const deleteUserNotification = async (req, res) => {
+  try {
+    const notification = await Notification.findById(req.params.id);
+
+    if (!notification) {
+      return res.status(404).json({ message: 'Notification not found' });
+    }
+
+    const userId = req.user._id;
+
+    // If direct recipient, permanently delete document from DB
+    const isDirectRecipient =
+      notification.recipient &&
+      notification.recipient.toString() === userId.toString();
+
+    if (isDirectRecipient) {
+      await notification.deleteOne();
+      return res.json({ message: 'Notification permanently deleted', notificationId: req.params.id });
+    }
+
+    // For broadcast or shared notifications, add user to deletedBy array so it's permanently hidden
+    if (!notification.deletedBy) {
+      notification.deletedBy = [];
+    }
+
+    const alreadyDeleted = notification.deletedBy.some(
+      (d) => d.user && d.user.toString() === userId.toString()
+    );
+
+    if (!alreadyDeleted) {
+      notification.deletedBy.push({
+        user: userId,
+        deletedAt: new Date(),
+      });
+      await notification.save();
+    }
+
+    res.json({ message: 'Notification permanently dismissed', notificationId: notification._id });
+  } catch (error) {
+    console.error('Error deleting user notification:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// @desc    Permanently clear all notifications for logged-in user
+// @route   DELETE /api/notifications/clear-all
+// @access  Private (Authenticated)
+export const clearAllUserNotifications = async (req, res) => {
+  try {
+    const userRole = req.user.role;
+    const userId = req.user._id;
+
+    // 1. Permanently delete all direct personal notifications for this user from DB
+    await Notification.deleteMany({
+      $or: [
+        { recipient: userId },
+        { recipient: userId.toString() },
+      ],
+    });
+
+    // 2. For broadcast notifications, mark as deletedBy this user
+    const audienceConditions = [{ targetAudience: 'all' }];
+    if (userRole === 'seller') {
+      audienceConditions.push({ targetAudience: 'sellers' });
+    } else if (userRole === 'buyer') {
+      audienceConditions.push({ targetAudience: 'buyers' });
+    } else if (userRole === 'admin') {
+      audienceConditions.push({ targetAudience: 'buyers' }, { targetAudience: 'sellers' });
+    }
+
+    const broadcastNotifs = await Notification.find({
+      isActive: true,
+      $or: audienceConditions,
+      'deletedBy.user': { $ne: userId },
+    });
+
+    for (const notif of broadcastNotifs) {
+      if (!notif.deletedBy) notif.deletedBy = [];
+      notif.deletedBy.push({
+        user: userId,
+        deletedAt: new Date(),
+      });
+      await notif.save();
+    }
+
+    res.json({ message: 'All notifications cleared permanently' });
+  } catch (error) {
+    console.error('Error clearing all user notifications:', error);
     res.status(500).json({ message: error.message });
   }
 };

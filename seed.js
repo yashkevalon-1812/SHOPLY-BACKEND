@@ -8,6 +8,7 @@ import { Coupon } from './Models/Coupon.js';
 import { Promotion } from './Models/Promotion.js';
 import { Notification } from './Models/Notification.js';
 import { connectDB } from './config/db.js';
+import { encryptValue } from './utils/payoutCrypto.js';
 
 dotenv.config();
 
@@ -62,6 +63,14 @@ const seedData = async () => {
         postalCode: '400001',
         country: 'India',
       },
+      payoutDetails: {
+        accountHolderName: 'Marcus Sterling',
+        bankName: 'HDFC Bank',
+        accountType: 'current',
+        accountNumberEncrypted: encryptValue('50100234567890'),
+        ifscEncrypted: encryptValue('HDFC0000123'),
+        updatedAt: new Date('2026-01-12T10:30:00Z'),
+      },
     });
 
     const seller2 = await User.create({
@@ -80,6 +89,14 @@ const seedData = async () => {
         state: 'Karnataka',
         postalCode: '560038',
         country: 'India',
+      },
+      payoutDetails: {
+        accountHolderName: 'Vikram Singhania',
+        bankName: 'ICICI Bank',
+        accountType: 'current',
+        accountNumberEncrypted: encryptValue('026009881234567'),
+        ifscEncrypted: encryptValue('ICIC0000260'),
+        updatedAt: new Date('2026-01-18T14:05:00Z'),
       },
     });
 
@@ -100,6 +117,14 @@ const seedData = async () => {
         postalCode: '560102',
         country: 'India',
       },
+      payoutDetails: {
+        accountHolderName: 'Amit Sharma',
+        bankName: 'State Bank of India',
+        accountType: 'savings',
+        accountNumberEncrypted: encryptValue('38291045678'),
+        ifscEncrypted: encryptValue('SBIN0003829'),
+        updatedAt: new Date('2026-02-02T09:15:00Z'),
+      },
     });
 
     const rejectedSeller = await User.create({
@@ -118,6 +143,14 @@ const seedData = async () => {
         state: 'Delhi',
         postalCode: '110006',
         country: 'India',
+      },
+      payoutDetails: {
+        accountHolderName: 'Rohan Mehra',
+        bankName: 'Punjab National Bank',
+        accountType: 'savings',
+        accountNumberEncrypted: encryptValue('11882200345'),
+        ifscEncrypted: encryptValue('PUNB0118822'),
+        updatedAt: new Date('2026-02-08T17:45:00Z'),
       },
     });
 
@@ -1345,6 +1378,7 @@ const seedData = async () => {
     console.log('========================================================');
     console.log('📊 Summary:');
     console.log(`- Users:         ${[adminUser, seller1, seller2, pendingSeller, rejectedSeller, buyer1, buyer2, buyer3].length}`);
+    console.log(`- Payouts:       4 seller bank accounts (AES-256-GCM encrypted)`);
     console.log(`- Products:      ${createdProducts.length}`);
     console.log(`- Coupons:       ${createdCoupons.length}`);
     console.log(`- Promotions:    1 active Mega Sale campaign`);

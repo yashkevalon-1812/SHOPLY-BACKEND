@@ -55,6 +55,18 @@ const notificationSchema = new mongoose.Schema(
         },
       },
     ],
+    deletedBy: [
+      {
+        user: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: 'User',
+        },
+        deletedAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
     isActive: {
       type: Boolean,
       default: true,
