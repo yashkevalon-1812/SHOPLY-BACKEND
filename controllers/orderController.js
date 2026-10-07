@@ -127,6 +127,13 @@ export const createOrder = async (req, res) => {
     const isSimulatedPrepaid =
       paymentMethod === 'Credit/Debit Card' || paymentMethod === 'UPI';
 
+    const customPaymentId =
+      req.body.utrNumber ||
+      req.body.paymentResult?.id ||
+      (paymentMethod === 'UPI'
+        ? `UPI-${Date.now().toString().slice(-8)}-${Math.floor(1000 + Math.random() * 9000)}`
+        : `PAY-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
+
     const order = new Order({
       user: req.user._id,
       orderItems: populatedItems,
@@ -142,7 +149,7 @@ export const createOrder = async (req, res) => {
       paidAt: isSimulatedPrepaid ? new Date() : null,
       paymentResult: isSimulatedPrepaid
         ? {
-            id: `PAY-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+            id: customPaymentId,
             status: 'COMPLETED',
             update_time: new Date().toISOString(),
             email_address: req.user.email,
