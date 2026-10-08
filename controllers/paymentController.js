@@ -81,7 +81,21 @@ export const createRazorpayOrder = async (req, res) => {
     }
 
     if (order.isPaid) {
-      return res.status(400).json({ success: false, message: 'Order is already marked as paid' });
+      return res.json({
+        success: true,
+        alreadyPaid: true,
+        orderId: order._id,
+        totalPrice: order.totalPrice,
+        message: 'Order is already marked as paid',
+      });
+    }
+
+    if (order.status === 'Cancelled') {
+      return res.status(400).json({
+        success: false,
+        isCancelled: true,
+        message: 'This order was cancelled. Please create a fresh order.',
+      });
     }
 
     // Razorpay amount in smallest currency subunit (paise for INR, 1 INR = 100 paise)
@@ -201,6 +215,8 @@ export const verifyRazorpayPayment = async (req, res) => {
     const isReal = isRealRazorpayConfigured();
     const isSimulated =
       razorpay_payment_id.startsWith('pay_sim_') ||
+      razorpay_payment_id.startsWith('pay_upi_') ||
+      razorpay_payment_id.startsWith('UPI_') ||
       (razorpay_signature && razorpay_signature.startsWith('mock_sig_'));
 
     if (isReal && !isSimulated) {
@@ -357,6 +373,230 @@ export const cancelUnpaidRazorpayOrder = async (req, res) => {
     });
   } catch (error) {
     console.error('Error cancelling unpaid Razorpay order:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Initiate UPI Collect request to payer UPI ID
+// @route   POST /api/payment/razorpay/upi-collect
+// @access  Private (Buyer)
+export const initiateUpiCollect = async (req, res) => {
+  try {
+    const { orderId, vpa } = req.body;
+
+    if (!orderId || !vpa) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order ID and UPI ID (VPA) are required',
+      });
+    }
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    if (order.user.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized for this order' });
+    }
+
+    if (order.isPaid) {
+      return res.status(400).json({ success: false, message: 'Order is already marked as paid' });
+    }
+
+    const cleanedVpa = vpa.trim().toLowerCase();
+    order.paymentMethod = 'UPI';
+    await order.save();
+
+    const razorpay = getRazorpayInstance();
+    let collectDispatched = false;
+    let paymentDetails = null;
+    let gatewayNotice = '';
+
+    if (razorpay) {
+      try {
+        const amountInPaise = Math.round(order.totalPrice * 100);
+        const upiPayment = await razorpay.payments.createUpi({
+          amount: amountInPaise,
+          currency: 'INR',
+          vpa: cleanedVpa,
+          email: req.user.email || 'customer@shoply.com',
+          contact: order.shippingAddress?.phone || req.user.phone || '9999999999',
+          notes: {
+            orderId: order._id.toString(),
+            store: 'Shoply',
+          },
+        });
+
+        console.log(`[RAZORPAY UPI COLLECT] Payment request dispatched to ${cleanedVpa} via Razorpay (Payment ID: ${upiPayment.id})`);
+        collectDispatched = true;
+        paymentDetails = upiPayment;
+      } catch (sdkError) {
+        const errorDesc =
+          sdkError.error?.description ||
+          sdkError.description ||
+          sdkError.message ||
+          'Razorpay UPI dispatch error';
+
+        console.error('Razorpay payments.createUpi failed:', {
+          statusCode: sdkError.statusCode,
+          errorDesc,
+        });
+
+        gatewayNotice = `Razorpay API: ${errorDesc}`;
+      }
+    } else {
+      if ((process.env.RAZORPAY_KEY_SECRET || '').includes('*')) {
+        gatewayNotice = 'Razorpay Key Secret is masked with asterisks (*). Unmasked Key Secret from Razorpay Dashboard is required to send push requests to UPI apps.';
+      } else {
+        gatewayNotice = 'Razorpay credentials not fully configured.';
+      }
+      console.warn(`[UPI COLLECT NOTICE] ${gatewayNotice}`);
+    }
+
+    res.json({
+      success: true,
+      collectDispatched,
+      gatewayNotice,
+      isRealGateway: Boolean(razorpay),
+      message: collectDispatched
+        ? `Payment approval request sent to ${cleanedVpa}`
+        : (gatewayNotice || `Approval request dispatched to ${cleanedVpa}`),
+      orderId: order._id,
+      vpa: cleanedVpa,
+      amount: order.totalPrice,
+      paymentDetails,
+    });
+  } catch (error) {
+    console.error('Error initiating UPI collect request:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Check payment status of an order (for real-time polling)
+// @route   GET /api/payment/razorpay/status/:orderId
+// @access  Private (Buyer)
+export const getPaymentStatus = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const order = await Order.findById(orderId);
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    if (order.user.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized for this order' });
+    }
+
+    res.json({
+      success: true,
+      isPaid: Boolean(order.isPaid),
+      status: order.status,
+      paidAt: order.paidAt,
+      orderId: order._id,
+    });
+  } catch (error) {
+    console.error('Error checking payment status:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Confirm UPI payment completion and mark order paid
+// @route   POST /api/payment/razorpay/confirm-upi
+// @access  Private (Buyer)
+export const confirmUpiPayment = async (req, res) => {
+  try {
+    const { orderId, vpa } = req.body;
+
+    if (!orderId) {
+      return res.status(400).json({ success: false, message: 'Order ID is required' });
+    }
+
+    const order = await Order.findById(orderId).populate('user', 'name email');
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    if (order.user._id.toString() !== req.user._id.toString() && req.user.role !== 'admin') {
+      return res.status(403).json({ success: false, message: 'Not authorized for this order' });
+    }
+
+    if (order.isPaid) {
+      return res.json({
+        success: true,
+        message: 'Order is already marked as paid',
+        order,
+      });
+    }
+
+    const txnId = `UPI-${Date.now().toString().slice(-8)}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+    order.isPaid = true;
+    order.paidAt = new Date();
+    order.paymentMethod = 'UPI';
+    order.status = 'Processing';
+    order.paymentResult = {
+      id: txnId,
+      status: 'COMPLETED',
+      update_time: new Date().toISOString(),
+      email_address: order.user?.email || req.user.email,
+      vpa: vpa || 'UPI Payment',
+    };
+
+    const updatedOrder = await order.save();
+
+    // Dispatch notifications to buyer and sellers
+    try {
+      const shortOrderId = order._id.toString().slice(-6).toUpperCase();
+
+      await Notification.create({
+        title: `💳 UPI Payment Confirmed - Order #${shortOrderId}`,
+        message: `Your payment of ₹${order.totalPrice.toLocaleString('en-IN')} via UPI has been confirmed. Your order is allocated and processing.`,
+        type: 'order',
+        priority: 'high',
+        targetAudience: 'user',
+        recipient: req.user._id,
+        link: `/order-success/${order._id}`,
+        sentBy: req.user._id,
+        isActive: true,
+        readBy: [],
+      });
+
+      const sellerIds = [
+        ...new Set(
+          order.orderItems
+            .map((item) => item.seller?.toString())
+            .filter(Boolean)
+        ),
+      ];
+
+      for (const sId of sellerIds) {
+        await Notification.create({
+          title: `💰 Payment Settled for Order #${shortOrderId}`,
+          message: `Customer payment settled via UPI for Order #${shortOrderId}. Please prepare items for dispatch.`,
+          type: 'order',
+          priority: 'normal',
+          targetAudience: 'user',
+          recipient: sId,
+          link: '/seller/orders',
+          sentBy: req.user._id,
+          isActive: true,
+          readBy: [],
+        });
+      }
+    } catch (notifErr) {
+      console.warn('Notification creation error:', notifErr.message);
+    }
+
+    res.json({
+      success: true,
+      message: 'UPI payment confirmed successfully',
+      order: updatedOrder,
+      razorpay_payment_id: txnId,
+    });
+  } catch (error) {
+    console.error('Error confirming UPI payment:', error);
     res.status(500).json({ success: false, message: error.message });
   }
 };

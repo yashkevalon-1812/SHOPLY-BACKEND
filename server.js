@@ -29,6 +29,13 @@ app.disable('x-powered-by');
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
+    permissionsPolicy: {
+      features: {
+        accelerometer: ["'self'", 'https://checkout.razorpay.com', '*'],
+        gyroscope: ["'self'", 'https://checkout.razorpay.com', '*'],
+        magnetometer: ["'self'", 'https://checkout.razorpay.com', '*'],
+      },
+    },
   })
 );
 
@@ -89,7 +96,15 @@ app.use(
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Accept',
+      'x-rtb-fingerprint-id',
+      'request-id',
+    ],
+    exposedHeaders: ['x-rtb-fingerprint-id', 'request-id'],
   })
 );
 app.use(express.json({ limit: '1mb' }));

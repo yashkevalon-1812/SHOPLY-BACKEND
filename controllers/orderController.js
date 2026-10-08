@@ -19,6 +19,33 @@ export const createOrder = async (req, res) => {
       return res.status(400).json({ message: 'No items in order' });
     }
 
+    // Auto-release and restock any previous abandoned/unpaid Razorpay orders from the same user
+    if (paymentMethod === 'Razorpay' || paymentMethod === 'UPI') {
+      try {
+        const recentUnpaidOrders = await Order.find({
+          user: req.user._id,
+          isPaid: false,
+          status: { $in: ['Processing', 'Pending'] },
+          paymentMethod: { $in: ['Razorpay', 'UPI'] },
+          createdAt: { $gte: new Date(Date.now() - 60 * 60 * 1000) },
+        });
+
+        for (const oldOrder of recentUnpaidOrders) {
+          for (const item of oldOrder.orderItems) {
+            if (item.product) {
+              await Product.findByIdAndUpdate(item.product, {
+                $inc: { stock: item.qty },
+              });
+            }
+          }
+          oldOrder.status = 'Cancelled';
+          await oldOrder.save();
+        }
+      } catch (cleanupErr) {
+        console.warn('Failed to clean up prior unpaid orders:', cleanupErr.message);
+      }
+    }
+
     // Attach seller ID to each item if not present, and update inventory stock
     const populatedItems = [];
     const deductedItems = [];
@@ -124,8 +151,10 @@ export const createOrder = async (req, res) => {
     const calculatedTaxPrice = Math.round(taxableAmount * 0.18 * 100) / 100;
     const calculatedTotalPrice = Math.round((taxableAmount + calculatedShippingPrice + calculatedTaxPrice) * 100) / 100;
 
-    const isSimulatedPrepaid =
-      paymentMethod === 'Credit/Debit Card' || paymentMethod === 'UPI';
+    // UPI, QR, and Razorpay orders are created UNPAID; they must be confirmed after payment
+    const isSimulatedPrepaid = Boolean(
+      req.body.isPaid === true && req.body.paymentResult?.status === 'COMPLETED'
+    );
 
     const customPaymentId =
       req.body.utrNumber ||
