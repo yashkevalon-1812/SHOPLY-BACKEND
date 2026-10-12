@@ -5,10 +5,10 @@ import { Message } from '../Models/Message.js';
 // @access  Public
 export const submitContactMessage = async (req, res) => {
   try {
-    const { name, email, subject, message } = req.body;
+    const { name, email, subject, message, phone, company } = req.body;
 
     if (!name || !email || !subject || !message) {
-      return res.status(400).json({ message: 'All fields are required' });
+      return res.status(400).json({ message: 'Name, email, subject, and message are required' });
     }
 
     const newMessage = await Message.create({
@@ -16,6 +16,8 @@ export const submitContactMessage = async (req, res) => {
       email,
       subject,
       message,
+      phone: phone || '',
+      company: company || '',
     });
 
     res.status(201).json({

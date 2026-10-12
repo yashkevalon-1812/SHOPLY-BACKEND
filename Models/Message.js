@@ -18,6 +18,16 @@ const messageSchema = new mongoose.Schema(
       required: [true, 'Subject is required'],
       trim: true,
     },
+    phone: {
+      type: String,
+      default: '',
+      trim: true,
+    },
+    company: {
+      type: String,
+      default: '',
+      trim: true,
+    },
     message: {
       type: String,
       required: [true, 'Message is required'],

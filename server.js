@@ -136,11 +136,24 @@ const frontendDistPath = path.resolve(__dirname, '../SHOPLY FRONTEND/dist');
 const frontendIndexPath = path.join(frontendDistPath, 'index.html');
 
 if (existsSync(frontendIndexPath)) {
-  app.use(express.static(frontendDistPath));
+  app.use(
+    express.static(frontendDistPath, {
+      etag: false,
+      maxAge: 0,
+      setHeaders: (res) => {
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Expires', '0');
+      },
+    })
+  );
 
   // For all non-API GET requests, serve index.html for React Router client-side routing
   app.use((req, res, next) => {
     if (req.method === 'GET' && !req.path.startsWith('/api')) {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
       return res.sendFile(frontendIndexPath);
     }
     next();
